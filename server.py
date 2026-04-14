@@ -21,8 +21,7 @@ app.add_middleware(
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
-    allow_credentials=True,
-    expose_headers=["*"],
+    allow_credentials=False,
 )
 
 print("Carregando modelo...")
@@ -32,7 +31,7 @@ print("Modelo pronto!")
 
 norm = transforms.Normalize(mean=[0.485,0.456,0.406], std=[0.229,0.224,0.225])
 transform = transforms.Compose([transforms.Resize((224,224)), transforms.ToTensor()])
-executor = ThreadPoolExecutor(max_workers=4)
+executor = ThreadPoolExecutor(max_workers=2)
 
 def processar_imagem(contents, epsilon):
     img_pil = Image.open(io.BytesIO(contents)).convert("RGB")
@@ -52,11 +51,7 @@ def processar_imagem(contents, epsilon):
 
 @app.get("/")
 def health():
-    return {"status": "ok", "message": "servidor funcionando"}
-
-@app.options("/{rest_of_path:path}")
-async def preflight(rest_of_path: str):
-    return Response(status_code=200)
+    return {"status": "ok"}
 
 @app.post("/adversarial")
 async def gerar_adversarial(
@@ -66,7 +61,15 @@ async def gerar_adversarial(
     contents = await file.read()
     loop = asyncio.get_event_loop()
     resultado = await loop.run_in_executor(executor, processar_imagem, contents, epsilon)
-    return Response(content=resultado, media_type="image/png")
+    return Response(
+        content=resultado,
+        media_type="image/png",
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "*",
+        }
+    )
 
 @app.post("/adversarial-lote")
 async def gerar_adversarial_lote(
@@ -83,8 +86,8 @@ async def gerar_adversarial_lote(
 
     loop = asyncio.get_event_loop()
     tarefas = [
-        loop.run_in_executor(executor, processar_imagem, contents, epsilon)
-        for contents in todos_contents
+        loop.run_in_executor(executor, processar_imagem, c, epsilon)
+        for c in todos_contents
     ]
     resultados = await asyncio.gather(*tarefas)
 
@@ -97,5 +100,8 @@ async def gerar_adversarial_lote(
     return Response(
         content=zip_buffer.read(),
         media_type="application/zip",
-        headers={"Content-Disposition": f"attachment; filename={nome_zip}.zip"}
+        headers={
+            "Content-Disposition": f"attachment; filename={nome_zip}.zip",
+            "Access-Control-Allow-Origin": "*",
+        }
     )
