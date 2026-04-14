@@ -158,3 +158,43 @@ async def gerar_lote(
         media_type="application/zip",
         headers={"Content-Disposition": f"attachment; filename={nome_zip}.zip"}
     )
+
+@app.post("/adversarial-com-diff")
+async def gerar_com_diff(
+    file: UploadFile = File(...),
+    cover: Optional[UploadFile] = File(default=None),
+    tecnica: str = Form(default="todas"),
+    epsilon: float = Form(default=0.03),
+    texto: str = Form(default=""),
+    cover_opacity: float = Form(default=0.03)
+):
+    contents = await file.read()
+    img_pil = Image.open(io.BytesIO(contents)).convert("RGB")
+    cover_pil = None
+    if cover:
+        cover_pil = Image.open(io.BytesIO(await cover.read())).convert("RGB")
+
+    tecnicas = ["fgsm", "steganografia", "typographic", "injection"] if tecnica == "todas" else [tecnica]
+    resultado_bytes = processar_tudo(img_pil, epsilon, texto, cover_pil, tecnicas)
+
+    # Calcula diferença ampliada no servidor
+    img_result = Image.open(io.BytesIO(resultado_bytes)).convert("RGB")
+    orig_arr = np.array(img_pil.resize(img_result.size, Image.LANCZOS), dtype=np.float32)
+    result_arr = np.array(img_result, dtype=np.float32)
+    diff = np.clip(np.abs(orig_arr - result_arr) * 50, 0, 255).astype(np.uint8)
+    diff_pil = Image.fromarray(diff)
+
+    # Retorna ZIP com as duas imagens
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, 'w') as zf:
+        zf.writestr("camuflada.png", resultado_bytes)
+        buf_diff = io.BytesIO()
+        diff_pil.save(buf_diff, format="PNG")
+        zf.writestr("diferenca.png", buf_diff.getvalue())
+
+    zip_buffer.seek(0)
+    return Response(
+        content=zip_buffer.read(),
+        media_type="application/zip",
+        headers={"Content-Disposition": "attachment; filename=resultado.zip"}
+    )
