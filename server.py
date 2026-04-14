@@ -57,3 +57,47 @@ async def gerar_adversarial(
     buf.seek(0)
 
     return Response(content=buf.read(), media_type="image/png")
+
+import zipfile
+from fastapi import Form
+from typing import List
+
+@app.post("/adversarial-lote")
+async def gerar_adversarial_lote(
+    files: List[UploadFile] = File(...),
+    epsilon: float = Form(default=0.03),
+    nome_zip: str = Form(default="imagens_camufladas")
+):
+    zip_buffer = io.BytesIO()
+    
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+        for file in files:
+            contents = await file.read()
+            img_pil = Image.open(io.BytesIO(contents)).convert("RGB")
+            tamanho_original = img_pil.size
+
+            img_tensor = transform(img_pil).unsqueeze(0)
+            img_tensor.requires_grad = True
+
+            output = model(norm(img_tensor))
+            loss = torch.nn.CrossEntropyLoss()(output, output.argmax(dim=1))
+            loss.backward()
+
+            img_adv = torch.clamp(img_tensor + epsilon * img_tensor.grad.sign(), 0, 1)
+            img_adv_pil = transforms.ToPILImage()(img_adv.squeeze(0))
+            img_adv_pil = img_adv_pil.resize(tamanho_original, Image.LANCZOS)
+
+            buf = io.BytesIO()
+            img_adv_pil.save(buf, format="PNG")
+            buf.seek(0)
+
+            nome_arquivo = f"camuflada_{file.filename}"
+            zip_file.writestr(nome_arquivo, buf.read())
+
+    zip_buffer.seek(0)
+    
+    return Response(
+        content=zip_buffer.read(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename={nome_zip}.zip"}
+    )
