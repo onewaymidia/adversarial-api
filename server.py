@@ -44,10 +44,10 @@ def typographic(img_pil, texto):
     img = img_pil.copy()
     draw = ImageDraw.Draw(img)
     w, h = img.size
-    draw.text((w//4, h//2), texto, fill=(254,254,254))
+    draw.text((w//4, h//2), texto, fill=(252,252,252))
     return img
 
-def adversarial_patch(img_pil, patch_size=60):
+def adversarial_patch(img_pil, patch_size=20):
     img = img_pil.copy()
     arr = np.array(img, dtype=np.float32)
     patch = np.zeros((patch_size, patch_size, 3))
@@ -69,7 +69,7 @@ def prompt_injection(img_pil, instrucao):
     img = img_pil.copy()
     draw = ImageDraw.Draw(img)
     w, h = img.size
-    draw.text((0, h-20), instrucao, fill=(254,254,254))
+    draw.text((0, h-20), instrucao, fill=(252,252,252))
     return img
 
 def processar_tudo(img_pil, epsilon=0.02, texto=None, cover_pil=None, tecnicas=None):
