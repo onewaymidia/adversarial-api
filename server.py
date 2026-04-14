@@ -1,7 +1,7 @@
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
-from typing import List
+from typing import List, Optional
 from PIL import Image
 import numpy as np
 import io
@@ -19,18 +19,27 @@ app.add_middleware(
 
 print("Servidor pronto!")
 
-def processar_imagem(contents, epsilon):
+def processar_imagem(contents, epsilon, cover_contents=None, cover_opacity=0.03):
     img_pil = Image.open(io.BytesIO(contents)).convert("RGB")
     tamanho_original = img_pil.size
     img_arr = np.array(img_pil, dtype=np.float32) / 255.0
+
+    # Perturbação adversarial
     gray = 0.299*img_arr[:,:,0] + 0.587*img_arr[:,:,1] + 0.114*img_arr[:,:,2]
     gx = np.gradient(gray, axis=1)
     gy = np.gradient(gray, axis=0)
     sinal = np.sign(gx + gy)
     sinal_3ch = np.stack([sinal]*3, axis=2)
     img_adv = np.clip(img_arr + (epsilon/100.0) * sinal_3ch, 0, 1)
+
+    # Mescla com cover image se fornecida
+    if cover_contents:
+        cover_pil = Image.open(io.BytesIO(cover_contents)).convert("RGB")
+        cover_pil = cover_pil.resize(tamanho_original, Image.LANCZOS)
+        cover_arr = np.array(cover_pil, dtype=np.float32) / 255.0
+        img_adv = np.clip(img_adv * (1 - cover_opacity) + cover_arr * cover_opacity, 0, 1)
+
     img_adv_pil = Image.fromarray((img_adv * 255).astype(np.uint8))
-    img_adv_pil = img_adv_pil.resize(tamanho_original, Image.LANCZOS)
     buf = io.BytesIO()
     img_adv_pil.save(buf, format="PNG")
     buf.seek(0)
@@ -43,23 +52,29 @@ def health():
 @app.post("/adversarial")
 async def gerar_adversarial(
     file: UploadFile = File(...),
-    epsilon: float = Form(default=8.0)
+    cover: Optional[UploadFile] = File(default=None),
+    epsilon: float = Form(default=8.0),
+    cover_opacity: float = Form(default=0.03)
 ):
     contents = await file.read()
-    resultado = processar_imagem(contents, epsilon)
+    cover_contents = await cover.read() if cover else None
+    resultado = processar_imagem(contents, epsilon, cover_contents, cover_opacity)
     return Response(content=resultado, media_type="image/png")
 
 @app.post("/adversarial-lote")
 async def gerar_adversarial_lote(
     files: List[UploadFile] = File(...),
+    cover: Optional[UploadFile] = File(default=None),
     epsilon: float = Form(default=8.0),
+    cover_opacity: float = Form(default=0.03),
     nome_zip: str = Form(default="imagens_camufladas")
 ):
+    cover_contents = await cover.read() if cover else None
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
         for file in files:
             contents = await file.read()
-            resultado = processar_imagem(contents, epsilon)
+            resultado = processar_imagem(contents, epsilon, cover_contents, cover_opacity)
             zip_file.writestr(f"camuflada_{file.filename}", resultado)
     zip_buffer.seek(0)
     return Response(
